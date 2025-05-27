@@ -6,10 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'SplashScreen.dart';
-
-const String kAccessTokenKey = 'access_token';
 
 void main() {
   runApp(
@@ -40,48 +37,33 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   GoogleSignInAccount? _currentUser;
   String? _accessToken;
-  bool _loading = true; // loading state while checking prefs
+  bool _loading = true;
 
   List<PlatformFile> _selectedFiles = [];
-  Map<String, String> _uploadStatus = {}; // filename -> status
+  Map<String, String> _uploadStatus = {};
 
   @override
   void initState() {
     super.initState();
-
     _initLoginState();
 
     _googleSignIn.onCurrentUserChanged.listen((account) async {
       setState(() => _currentUser = account);
-      if (account != null) {
-        await _getAccessToken(account);
-      } else {
-        await _clearAccessToken();
-      }
+      if (account != null) await _getAccessToken(account);
     });
   }
 
   Future<void> _initLoginState() async {
-    // Try silent sign-in
-    final account = await _googleSignIn.signInSilently();
-    if (account != null) {
-      setState(() {
-        _currentUser = account;
-      });
-      await _getAccessToken(account);
-    } else {
-      // If silent sign-in fails, check stored token
-      final prefs = await SharedPreferences.getInstance();
-      final storedToken = prefs.getString(kAccessTokenKey);
-      if (storedToken != null && storedToken.isNotEmpty) {
-        setState(() {
-          _accessToken = storedToken;
-        });
+    try {
+      final account = await _googleSignIn.signInSilently();
+      if (account != null) {
+        setState(() => _currentUser = account);
+        await _getAccessToken(account);
       }
+    } catch (e) {
+      print('Silent sign-in failed: $e');
     }
-    setState(() {
-      _loading = false;
-    });
+    setState(() => _loading = false);
   }
 
   Future<void> _getAccessToken(GoogleSignInAccount account) async {
@@ -90,19 +72,9 @@ class _MyAppState extends State<MyApp> {
       setState(() {
         _accessToken = auth.accessToken;
       });
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(kAccessTokenKey, auth.accessToken ?? '');
     } catch (e) {
       print('Failed to get access token: $e');
     }
-  }
-
-  Future<void> _clearAccessToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(kAccessTokenKey);
-    setState(() {
-      _accessToken = null;
-    });
   }
 
   Future<void> _handleSignIn() async {
@@ -122,7 +94,6 @@ class _MyAppState extends State<MyApp> {
       return;
     }
 
-    // Refresh token before upload
     if (_currentUser != null) {
       await _getAccessToken(_currentUser!);
     }
@@ -145,7 +116,7 @@ class _MyAppState extends State<MyApp> {
         _uploadStatus[file.name] = 'Uploading...';
       });
 
-      final uri = Uri.parse('http://localhost:3000/upload');
+      final uri = Uri.parse('https://youtubemulti-production.up.railway.app/upload');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_accessToken';
       request.fields['title'] = file.name;
@@ -202,7 +173,7 @@ class _MyAppState extends State<MyApp> {
       home: Scaffold(
         backgroundColor: Colors.black,
         appBar: AppBar(
-          backgroundColor: Color(0xFF34495E), // a nice dark muted blue-grey
+          backgroundColor: Color(0xFF34495E),
           title: Text('Youtube Multi'),
         ),
         drawer: Drawer(
@@ -212,25 +183,21 @@ class _MyAppState extends State<MyApp> {
               DrawerHeader(
                 decoration: BoxDecoration(color: Color(0xFF34495E)),
                 child: Text(
-                  _currentUser != null
-                      ? 'Signed in as\n${_currentUser!.email}'
-                      : 'Not Signed In',
+                  _currentUser != null ? 'Signed in as\n${_currentUser!.email}' : 'Not Signed In',
                   style: TextStyle(color: Colors.white, fontSize: 18),
                 ),
               ),
               ListTile(
                 title: Text('Home'),
-                onTap: () {
-                  Navigator.pop(context);
-                },
+                onTap: () => Navigator.pop(context),
               ),
               ListTile(
                 title: Text('Sign Out'),
                 onTap: () async {
                   await _googleSignIn.signOut();
-                  await _clearAccessToken();
                   setState(() {
                     _currentUser = null;
+                    _accessToken = null;
                     _selectedFiles.clear();
                     _uploadStatus.clear();
                   });
@@ -242,7 +209,7 @@ class _MyAppState extends State<MyApp> {
         ),
         body: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: _currentUser == null && (_accessToken == null || _accessToken!.isEmpty)
+          child: _currentUser == null
               ? Column(
                   mainAxisAlignment: MainAxisAlignment.start,
                   children: [
@@ -252,7 +219,7 @@ class _MyAppState extends State<MyApp> {
                         minimumSize: Size(double.infinity, 50),
                         backgroundColor: Colors.green,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4), // minimal rounding
+                          borderRadius: BorderRadius.circular(4),
                         ),
                       ),
                       onPressed: _handleSignIn,
@@ -271,16 +238,23 @@ class _MyAppState extends State<MyApp> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ElevatedButton(
+                   ElevatedButton(
                       onPressed: _pickAndUploadVideos,
                       style: ElevatedButton.styleFrom(
                         minimumSize: Size(double.infinity, 50),
                         backgroundColor: Colors.green,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4), // minimal rounding
+                          borderRadius: BorderRadius.circular(4),
                         ),
                       ),
-                      child: Text('Pick & Upload Videos'),
+                      child: Text(
+                        'Pick & Upload Videos',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
                     SizedBox(height: 12),
                     if (_selectedFiles.isNotEmpty)
@@ -289,7 +263,7 @@ class _MyAppState extends State<MyApp> {
                           child: Table(
                             border: TableBorder.all(color: Colors.white54),
                             columnWidths: const {
-                              0: FixedColumnWidth(40), // Serial no
+                              0: FixedColumnWidth(40),
                               1: FlexColumnWidth(3),
                               2: FlexColumnWidth(2),
                             },
@@ -299,31 +273,25 @@ class _MyAppState extends State<MyApp> {
                                 children: [
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      '#',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white),
-                                      textAlign: TextAlign.center,
-                                    ),
+                                    child: Text('#',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white),
+                                        textAlign: TextAlign.center),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      'Filename',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white),
-                                    ),
+                                    child: Text('Filename',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text(
-                                      'Status',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white),
-                                    ),
+                                    child: Text('Status',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)),
                                   ),
                                 ],
                               ),
@@ -335,31 +303,25 @@ class _MyAppState extends State<MyApp> {
                                   children: [
                                     Padding(
                                       padding: const EdgeInsets.all(8.0),
-                                      child: Text(
-                                        '$idx',
-                                        style: TextStyle(color: Colors.white),
-                                        textAlign: TextAlign.center,
-                                      ),
+                                      child: Text('$idx',
+                                          style: TextStyle(color: Colors.white),
+                                          textAlign: TextAlign.center),
                                     ),
                                     Padding(
                                       padding: const EdgeInsets.all(8.0),
-                                      child: Text(
-                                        file.name,
-                                        style: TextStyle(color: Colors.white),
-                                      ),
+                                      child: Text(file.name,
+                                          style: TextStyle(color: Colors.white)),
                                     ),
                                     Padding(
                                       padding: const EdgeInsets.all(8.0),
-                                      child: Text(
-                                        status,
-                                        style: TextStyle(
-                                          color: status.startsWith('Success')
-                                              ? Colors.greenAccent
-                                              : status.startsWith('Failed')
-                                                  ? Colors.redAccent
-                                                  : Colors.white,
-                                        ),
-                                      ),
+                                      child: Text(status,
+                                          style: TextStyle(
+                                            color: status.startsWith('Success')
+                                                ? Colors.greenAccent
+                                                : status.startsWith('Failed')
+                                                    ? Colors.redAccent
+                                                    : Colors.yellowAccent,
+                                          )),
                                     ),
                                   ],
                                 );
