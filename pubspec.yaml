@@ -1,0 +1,19 @@
+
+name: flutter_app
+description: A Flutter app to upload videos to YouTube.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_sign_in: ^6.0.1
+  http: ^0.13.4
+  file_picker: ^5.2.2
+  shared_preferences: ^2.0.15
+
+flutter:
+  uses-material-design: true
