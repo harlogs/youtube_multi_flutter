@@ -20,7 +20,7 @@ void main() {
 final GoogleSignIn _googleSignIn = GoogleSignIn(
   clientId: kIsWeb
       ? '419479685978-a2i54r2v2bjvkvm5mpd1i4ks5r3f68tt.apps.googleusercontent.com'
-      : null,
+      : '419479685978-k31nq590lglod4c2sm3tsounmc5ovu5d.apps.googleusercontent.com',
   scopes: [
     'email',
     'https://www.googleapis.com/auth/youtube.upload',
@@ -158,181 +158,176 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return MaterialApp(
-        home: Scaffold(
-          backgroundColor: Colors.black,
-          body: Center(
-            child: CircularProgressIndicator(color: Colors.green),
-          ),
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.green),
         ),
       );
     }
 
-    return MaterialApp(
-      title: 'Youtube Multi',
-      home: Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Color(0xFF34495E),
-          title: Text('Youtube Multi'),
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Color(0xFF34495E),
+        title: Text('Youtube Multi'),
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: Color(0xFF34495E)),
+              child: Text(
+                _currentUser != null ? 'Signed in as\n${_currentUser!.email}' : 'Not Signed In',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+            ListTile(
+              title: Text('Home'),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              title: Text('Sign Out'),
+              onTap: () async {
+                await _googleSignIn.signOut();
+                setState(() {
+                  _currentUser = null;
+                  _accessToken = null;
+                  _selectedFiles.clear();
+                  _uploadStatus.clear();
+                });
+                Navigator.pop(context);
+              },
+            ),
+          ],
         ),
-        drawer: Drawer(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              DrawerHeader(
-                decoration: BoxDecoration(color: Color(0xFF34495E)),
-                child: Text(
-                  _currentUser != null ? 'Signed in as\n${_currentUser!.email}' : 'Not Signed In',
-                  style: TextStyle(color: Colors.white, fontSize: 18),
-                ),
-              ),
-              ListTile(
-                title: Text('Home'),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                title: Text('Sign Out'),
-                onTap: () async {
-                  await _googleSignIn.signOut();
-                  setState(() {
-                    _currentUser = null;
-                    _accessToken = null;
-                    _selectedFiles.clear();
-                    _uploadStatus.clear();
-                  });
-                  Navigator.pop(context);
-                },
-              ),
-            ],
-          ),
-        ),
-        body: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: _currentUser == null
-              ? Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: [
-                    SizedBox(height: 24),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: Size(double.infinity, 50),
-                        backgroundColor: Colors.green,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      onPressed: _handleSignIn,
-                      child: Text(
-                        'Sign in with Google',
-                        style: TextStyle(color: Colors.white, fontSize: 16),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: _currentUser == null
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  SizedBox(height: 24),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: Size(double.infinity, 50),
+                      backgroundColor: Colors.green,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Please sign in with Google to upload videos',
-                      style: TextStyle(color: Colors.white70),
+                    onPressed: _handleSignIn,
+                    child: Text(
+                      'Sign in with Google',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
                     ),
-                  ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                   ElevatedButton(
-                      onPressed: _pickAndUploadVideos,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: Size(double.infinity, 50),
-                        backgroundColor: Colors.green,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      child: Text(
-                        'Pick & Upload Videos',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Please sign in with Google to upload videos',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ElevatedButton(
+                    onPressed: _pickAndUploadVideos,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: Size(double.infinity, 50),
+                      backgroundColor: Colors.green,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
-                    SizedBox(height: 12),
-                    if (_selectedFiles.isNotEmpty)
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: Table(
-                            border: TableBorder.all(color: Colors.white54),
-                            columnWidths: const {
-                              0: FixedColumnWidth(40),
-                              1: FlexColumnWidth(3),
-                              2: FlexColumnWidth(2),
-                            },
-                            children: [
-                              TableRow(
-                                decoration: BoxDecoration(color: Colors.grey[800]),
+                    child: Text(
+                      'Pick & Upload Videos',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  if (_selectedFiles.isNotEmpty)
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Table(
+                          border: TableBorder.all(color: Colors.white54),
+                          columnWidths: const {
+                            0: FixedColumnWidth(40),
+                            1: FlexColumnWidth(3),
+                            2: FlexColumnWidth(2),
+                          },
+                          children: [
+                            TableRow(
+                              decoration: BoxDecoration(color: Colors.grey[800]),
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Text('#',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white),
+                                      textAlign: TextAlign.center),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Text('Filename',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white)),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Text('Status',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white)),
+                                ),
+                              ],
+                            ),
+                            ..._selectedFiles.asMap().entries.map((entry) {
+                              final idx = entry.key + 1;
+                              final file = entry.value;
+                              final status = _uploadStatus[file.name] ?? 'Pending';
+                              return TableRow(
                                 children: [
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text('#',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white),
+                                    child: Text('$idx',
+                                        style: TextStyle(color: Colors.white),
                                         textAlign: TextAlign.center),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text('Filename',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white)),
+                                    child: Text(file.name,
+                                        style: TextStyle(color: Colors.white)),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text('Status',
+                                    child: Text(status,
                                         style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white)),
+                                          color: status.startsWith('Success')
+                                              ? Colors.greenAccent
+                                              : status.startsWith('Failed')
+                                                  ? Colors.redAccent
+                                                  : Colors.yellowAccent,
+                                        )),
                                   ),
                                 ],
-                              ),
-                              ..._selectedFiles.asMap().entries.map((entry) {
-                                final idx = entry.key + 1;
-                                final file = entry.value;
-                                final status = _uploadStatus[file.name] ?? 'Pending';
-                                return TableRow(
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Text('$idx',
-                                          style: TextStyle(color: Colors.white),
-                                          textAlign: TextAlign.center),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Text(file.name,
-                                          style: TextStyle(color: Colors.white)),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Text(status,
-                                          style: TextStyle(
-                                            color: status.startsWith('Success')
-                                                ? Colors.greenAccent
-                                                : status.startsWith('Failed')
-                                                    ? Colors.redAccent
-                                                    : Colors.yellowAccent,
-                                          )),
-                                    ),
-                                  ],
-                                );
-                              }),
-                            ],
-                          ),
+                              );
+                            }),
+                          ],
                         ),
                       ),
-                  ],
-                ),
-        ),
+                    ),
+                ],
+              ),
       ),
     );
   }
