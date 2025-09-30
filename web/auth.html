@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>OAuth Redirect</title>
+</head>
+<body>
+  <script>
+    // Extract the access token from the URL fragment
+    const hash = window.location.hash.substring(1); // remove '#'
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+
+    if (accessToken) {
+      // Redirect to Flutter with the scheme you set in FlutterWebAuth
+      window.location.href = "myapp://auth#" + hash;
+    } else {
+      document.body.innerHTML = "<h2>Authentication failed or cancelled</h2>";
+      console.error("No access token found in URL fragment:", hash);
+    }
+  </script>
+</body>
+</html>

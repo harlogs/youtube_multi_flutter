@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'SplashScreen.dart';
 import 'MultiVideoPickerUploadPage.dart';
+import 'package:flutter_web_auth/flutter_web_auth.dart';
+import 'dart:convert'; // for jsonDecode
+import 'package:http/http.dart' as http; 
 // import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'dart:io' show Platform;
 
@@ -56,6 +59,7 @@ class _MyAppState extends State<MyApp> {
   GoogleSignInAccount? _currentUser;
   String? _accessToken;
   bool _loading = true;
+  String? selectedChannelId; 
 
   // late BannerAd _bannerAd;
   // bool _isBannerAdReady = false;
@@ -109,11 +113,52 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _handleSignIn() async {
-    try {
-      await _googleSignIn.signIn();
-    } catch (error) {
-      print('Sign in failed: $error');
+    if (kIsWeb) {
+      await _handleSignInWeb();
+    } else {
+      try {
+        await _googleSignIn.signIn();
+      } catch (error) {
+        print('Sign in failed: $error');
+      }
     }
+  }
+
+  Future<void> _handleSignInWeb() async {
+    final clientId = clientIdd;
+    final redirectUri = 'https://harlogs.github.io/youtube_multi_flutter/auth'; // Must match OAuth redirect
+    final scopes = [
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ].join(' ');
+
+    final url =
+        'https://accounts.google.com/o/oauth2/v2/auth?response_type=token&client_id=$clientId&redirect_uri=$redirectUri&scope=$scopes&prompt=consent';
+
+    final result = await FlutterWebAuth.authenticate(
+        url: url, callbackUrlScheme: 'https');
+
+    final fragment = Uri.parse(result).fragment;
+    final accessToken = Uri.splitQueryString(fragment)['access_token'];
+
+    setState(() {
+      _accessToken = accessToken;
+    });
+
+    // Fetch channels
+    final res = await http.get(
+      Uri.parse(
+          'https://www.googleapis.com/youtube/v3/channels?mine=true&part=id,snippet'),
+      headers: {'Authorization': 'Bearer $accessToken'},
+    );
+    final data = jsonDecode(res.body);
+
+    // Example: pick first channel by default
+    if (data['items'] != null && data['items'].isNotEmpty) {
+      selectedChannelId = data['items'][0]['id']; // <-- save channelId publicly
+      print('Selected Channel ID: $selectedChannelId');
+    }
+    // Sho
   }
 
   @override
@@ -279,7 +324,7 @@ class _MyAppState extends State<MyApp> {
       );
     }
 
-    return MultiVideoPickerUploadPage(accessToken: _accessToken);
+    return MultiVideoPickerUploadPage(accessToken: _accessToken, channelId: selectedChannelId);
   }
 
   // @override

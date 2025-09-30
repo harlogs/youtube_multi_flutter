@@ -7,10 +7,15 @@ import 'package:http/http.dart' as http;
 
 /// A helper class to upload videos to YouTube using resumable upload.
 class YouTubeUploader {
+  final String accessToken;
+  final String selectedChannelId;
+
+  YouTubeUploader(this.accessToken, {required this.selectedChannelId});
   static const String _uploadInitiationUrl =
       'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
   static const int _chunkSize = 1024 * 1024 * 5; // 5 MB chunks
   static const int _maxRetries = 5;
+  // final String selectedChannelId; 
 
   /// Uploads a video file to YouTube using a resumable upload session.
   ///
@@ -23,7 +28,8 @@ class YouTubeUploader {
   /// Returns the uploaded YouTube video ID.
   static Future<String> uploadVideo({
     required File file,
-    required String accessToken,
+    // required String accessToken,
+    // required String selectedChannelId,
     required String title,
     String description = '',
     required Function(double) onProgress,
@@ -43,6 +49,7 @@ class YouTubeUploader {
         'snippet': {
           'title': title,
           'description': description,
+          'channelId': selectedChannelId
         },
         'status': {
           'privacyStatus': 'private',
