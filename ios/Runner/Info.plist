@@ -53,6 +53,12 @@
 	<key>NSCameraUsageDescription</key>
 	<string>This app requires access to the camera for video capture (if needed).</string>
 
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-2342650808451846~9649482048</string>
+
+	<key>NSUserTrackingUsageDescription</key>
+  	<string>This identifier will be used to deliver personalized ads to you.</string>
+
 	<!-- ✅ Google Sign-In required settings -->
 	<key>CFBundleURLTypes</key>
 	<array>

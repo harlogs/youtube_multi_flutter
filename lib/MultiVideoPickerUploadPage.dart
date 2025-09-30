@@ -1,9 +1,13 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-import 'dart:typed_data';
-import 'package:google_sign_in/google_sign_in.dart';
+
 import 'main.dart';
 
 class MultiVideoPickerUploadPage extends StatefulWidget {
@@ -21,7 +25,6 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   late SharedPreferences _prefs;
   bool _loading = false;
 
-  // Notifiers for each video's upload progress and status
   final Map<String, ValueNotifier<double>> _uploadProgressNotifiers = {};
   final Map<String, ValueNotifier<String>> _uploadStatusNotifiers = {};
 
@@ -86,28 +89,9 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
   }
 
-  // Initialize ValueNotifiers for progress and status if not exist
   void _initNotifiersForVideo(String id) {
     _uploadProgressNotifiers.putIfAbsent(id, () => ValueNotifier<double>(0));
     _uploadStatusNotifiers.putIfAbsent(id, () => ValueNotifier<String>(''));
-  }
-
-  Stream<List<int>> _trackProgress(Stream<List<int>> stream, String id, int totalBytes) async* {
-    int sent = 0;
-    const int throttleDurationMs = 300;
-    int lastUpdateTime = DateTime.now().millisecondsSinceEpoch;
-
-    await for (var chunk in stream) {
-      sent += chunk.length;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - lastUpdateTime > throttleDurationMs) {
-        lastUpdateTime = now;
-        _uploadProgressNotifiers[id]?.value = sent / totalBytes;
-      }
-      yield chunk;
-    }
-    // Ensure 100% progress when done
-    _uploadProgressNotifiers[id]?.value = 1.0;
   }
 
   Future<void> _uploadSelectedVideos() async {
@@ -117,11 +101,12 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
       _loading = true;
     });
 
+    final uploader = YouTubeUploader(widget.accessToken!);
+
     for (final asset in _selectedVideos) {
       if (_uploadedVideoIds.contains(asset.id)) continue;
 
       _initNotifiersForVideo(asset.id);
-
       _uploadStatusNotifiers[asset.id]?.value = 'Uploading...';
       _uploadProgressNotifiers[asset.id]?.value = 0;
 
@@ -130,28 +115,45 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
         _uploadStatusNotifiers[asset.id]?.value = 'Failed (No file)';
         continue;
       }
+
       final name = file.path.split('/').last;
-
-      final uri = Uri.parse('https://youtubemulti-production.up.railway.app/upload');
-      final length = await file.length();
-
-      final stream = http.ByteStream(_trackProgress(file.openRead(), asset.id, length));
-      final request = http.MultipartRequest('POST', uri)
-        ..headers['Authorization'] = 'Bearer ${widget.accessToken}'
-        ..fields['title'] = name
-        ..files.add(http.MultipartFile('video', stream, length, filename: name));
+      final bytes = await file.readAsBytes();
 
       try {
-        final response = await http.Response.fromStream(await request.send());
-        if (response.statusCode == 200) {
+        final videoId = await uploader.uploadResumable(
+          videoBytes: bytes,
+          title: name,
+          description: 'Uploaded via Flutter app',
+          onProgress: (progress) {
+            _uploadProgressNotifiers[asset.id]?.value = progress;
+          },
+        );
+
+        if (videoId != null) {
           _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
           _uploadedVideoIds.add(asset.id);
           await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
         } else {
-          _uploadStatusNotifiers[asset.id]?.value = 'Failed (${response.statusCode})';
+          _uploadStatusNotifiers[asset.id]?.value = 'Failed';
         }
       } catch (e) {
-        _uploadStatusNotifiers[asset.id]?.value = 'Failed (Exception)';
+        _uploadStatusNotifiers[asset.id]?.value = 'Failed: $e';
+
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text("Upload Failed"),
+              content: Text("Video '${name}' failed to upload.\nError: $e"),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("OK"),
+                )
+              ],
+            ),
+          );
+        }
       }
     }
 
@@ -296,5 +298,104 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
               itemBuilder: (_, i) => _buildGridItem(_videos[i]),
             ),
     );
+  }
+}
+
+/// YouTubeUploader class with instance method uploadResumable
+class YouTubeUploader {
+  static const String _uploadInitiationUrl =
+      'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
+  static const int _chunkSize = 1024 * 1024 * 5; // 5 MB chunks
+  static const int _maxRetries = 5;
+
+  final String accessToken;
+
+  YouTubeUploader(this.accessToken);
+
+  /// Uploads video bytes using a resumable YouTube upload session.
+  /// Returns the YouTube video ID if successful, otherwise null.
+  Future<String?> uploadResumable({
+    required Uint8List videoBytes,
+    required String title,
+    String description = '',
+    required Function(double) onProgress,
+  }) async {
+    final totalSize = videoBytes.length;
+
+    // Step 1: Initiate the resumable upload session
+    final initRes = await http.post(
+      Uri.parse(_uploadInitiationUrl),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': 'video/*',
+        'X-Upload-Content-Length': totalSize.toString(),
+      },
+      body: jsonEncode({
+        'snippet': {
+          'title': title,
+          'description': description,
+        },
+        'status': {
+          'privacyStatus': 'private',
+        },
+      }),
+    );
+
+    if (initRes.statusCode != 200) {
+      throw Exception('Failed to initiate upload: ${initRes.body}');
+    }
+
+    final uploadUrl = initRes.headers['location'];
+    if (uploadUrl == null) {
+      throw Exception('Upload session URL not returned');
+    }
+
+    int offset = 0;
+    int retries = 0;
+
+    while (offset < totalSize) {
+      final end = (offset + _chunkSize) > totalSize ? totalSize : (offset + _chunkSize);
+      final chunk = videoBytes.sublist(offset, end);
+      final chunkLength = chunk.length;
+      final rangeHeader = 'bytes $offset-${offset + chunkLength - 1}/$totalSize';
+
+      try {
+        final uploadRes = await http.put(
+          Uri.parse(uploadUrl),
+          headers: {
+            'Authorization': 'Bearer $accessToken',
+            'Content-Length': chunkLength.toString(),
+            'Content-Type': 'video/*',
+            'Content-Range': rangeHeader,
+          },
+          body: chunk,
+        );
+
+        if (uploadRes.statusCode == 200 || uploadRes.statusCode == 201) {
+          // Upload complete, parse returned video ID
+          final resBody = jsonDecode(uploadRes.body);
+          return resBody['id'];
+        } else if (uploadRes.statusCode == 308) {
+          // Resume Incomplete
+          offset += chunkLength;
+          onProgress(offset / totalSize);
+          retries = 0; // reset retries after success chunk
+        } else {
+          throw HttpException(
+            'Unexpected status code: ${uploadRes.statusCode}',
+            uri: Uri.parse(uploadUrl),
+          );
+        }
+      } catch (e) {
+        retries++;
+        if (retries >= _maxRetries) {
+          rethrow;
+        }
+        await Future.delayed(Duration(seconds: 2 * retries));
+      }
+    }
+
+    throw Exception('Upload failed after maximum retries');
   }
 }
