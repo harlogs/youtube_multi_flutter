@@ -13,7 +13,7 @@
 
     if (accessToken) {
       // Redirect to Flutter with the scheme you set in FlutterWebAuth
-      window.location.href = "https://auth#" + hash;
+      window.location.href = "myapp://auth#" + hash;
     } else {
       document.body.innerHTML = "<h2>Authentication failed or cancelled</h2>";
       console.error("No access token found in URL fragment:", hash);

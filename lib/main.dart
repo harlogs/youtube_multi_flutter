@@ -136,7 +136,7 @@ class _MyAppState extends State<MyApp> {
         'https://accounts.google.com/o/oauth2/v2/auth?response_type=token&client_id=$clientId&redirect_uri=$redirectUri&scope=$scopes&prompt=consent';
 
     final result = await FlutterWebAuth.authenticate(
-        url: url, callbackUrlScheme: 'https');
+        url: url, callbackUrlScheme: 'myapp');
 
     final fragment = Uri.parse(result).fragment;
     final accessToken = Uri.splitQueryString(fragment)['access_token'];
