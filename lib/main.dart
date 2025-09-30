@@ -126,7 +126,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _handleSignInWeb() async {
     final clientId = clientIdd;
-    final redirectUri = 'https://harlogs.github.io/youtube_multi_flutter/auth'; // Must match OAuth redirect
+    final redirectUri = 'https://harlogs.github.io/youtube_multi_flutter/auth.html'; // Must match OAuth redirect
     final scopes = [
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/userinfo.email',
