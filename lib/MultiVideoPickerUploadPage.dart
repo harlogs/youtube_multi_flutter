@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io' show File;
@@ -86,6 +87,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     _uploadStatusNotifiers.putIfAbsent(id, () => ValueNotifier<String>(''));
   }
 
+  /// --- WEB ONLY ---
   Future<List<html.File>> pickVideosWeb() async {
     final completer = Completer<List<html.File>>();
 
@@ -93,17 +95,15 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
       ..accept = 'video/*'
       ..multiple = true;
 
-    // Must add this to DOM so that browser allows the picker
     html.document.body!.append(input);
 
     input.onChange.listen((event) {
       final files = input.files;
       completer.complete(files?.toList() ?? []);
-      input.remove(); // Remove after selection
+      input.remove();
     });
 
     input.click();
-
     return completer.future;
   }
 
@@ -115,123 +115,95 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   }
 
   Future<void> _uploadSelectedVideosWeb() async {
-  if (widget.accessToken == null || widget.channelId == null) return;
-  setState(() => _loading = true);
-
-  final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
-
-  // Open the file picker
-  final files = await pickVideosWeb();
-  if (files.isEmpty) {
-    setState(() => _loading = false);
-    return;
-  }
-
-  for (final file in files) {
-    final bytes = await readVideoBytes(file);
-    if (bytes == null) continue;
-
-    final name = file.name;
-
-    // Initialize progress and status notifiers
-    _uploadProgressNotifiers.putIfAbsent(name, () => ValueNotifier<double>(0));
-    _uploadStatusNotifiers.putIfAbsent(name, () => ValueNotifier<String>('Uploading...'));
-
-    try {
-      final videoId = await uploader.uploadResumable(
-        videoBytes: bytes,
-        title: name,
-        description: 'Uploaded via Flutter web app',
-        onProgress: (progress) => _uploadProgressNotifiers[name]?.value = progress,
-      );
-
-      if (videoId != null) {
-        _uploadStatusNotifiers[name]?.value = 'Uploaded';
-      } else {
-        _uploadStatusNotifiers[name]?.value = 'Failed';
-      }
-    } catch (e) {
-      _uploadStatusNotifiers[name]?.value = 'Failed: $e';
-    }
-  }
-
-  setState(() => _loading = false);
-}
-
-
-  Future<void> pickVideosWebAndUpload() async {
     if (widget.accessToken == null || widget.channelId == null) return;
+    setState(() => _loading = true);
 
-    final uploader = YouTubeUploader(
-      widget.accessToken!,
-      selectedChannelId: widget.channelId!,
-    );
+    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
 
     final files = await pickVideosWeb();
+    if (files.isEmpty) {
+      setState(() => _loading = false);
+      return;
+    }
+
     for (final file in files) {
       final bytes = await readVideoBytes(file);
       if (bytes == null) continue;
 
       final name = file.name;
+
+      _uploadProgressNotifiers.putIfAbsent(name, () => ValueNotifier<double>(0));
+      _uploadStatusNotifiers.putIfAbsent(name, () => ValueNotifier<String>('Uploading...'));
+
       try {
-        await uploader.uploadResumable(
+        final videoId = await uploader.uploadResumable(
           videoBytes: bytes,
           title: name,
-          onProgress: (progress) => print('Upload progress: ${progress * 100}%'),
+          description: 'Uploaded via Flutter web app',
+          onProgress: (progress) => _uploadProgressNotifiers[name]?.value = progress,
         );
+
+        if (videoId != null) {
+          _uploadStatusNotifiers[name]?.value = 'Uploaded';
+        } else {
+          _uploadStatusNotifiers[name]?.value = 'Failed';
+        }
       } catch (e) {
-        print('Upload failed for $name: $e');
+        _uploadStatusNotifiers[name]?.value = 'Failed: $e';
       }
     }
+
+    setState(() => _loading = false);
   }
 
-    Future<void> _uploadSelectedVideos() async {
-      if (widget.accessToken == null || widget.channelId == null) return;
-      setState(() => _loading = true);
+  /// --- MOBILE ONLY ---
+  Future<void> _uploadSelectedVideos() async {
+    if (widget.accessToken == null || widget.channelId == null) return;
+    setState(() => _loading = true);
 
-      final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
+    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
 
-      for (final asset in _selectedVideos) {
-        if (_uploadedVideoIds.contains(asset.id)) continue;
+    for (final asset in _selectedVideos) {
+      if (_uploadedVideoIds.contains(asset.id)) continue;
 
-        _initNotifiersForVideo(asset.id);
-        _uploadStatusNotifiers[asset.id]?.value = 'Uploading...';
-        _uploadProgressNotifiers[asset.id]?.value = 0;
+      _initNotifiersForVideo(asset.id);
+      _uploadStatusNotifiers[asset.id]?.value = 'Uploading...';
+      _uploadProgressNotifiers[asset.id]?.value = 0;
 
-        final file = await asset.file;
-        if (file == null) {
-          _uploadStatusNotifiers[asset.id]?.value = 'Failed (No file)';
-          continue;
-        }
-
-        final name = file.path.split('/').last;
-        final bytes = await file.readAsBytes();
-
-        try {
-          final videoId = await uploader.uploadResumable(
-            videoBytes: bytes,
-            title: name,
-            description: 'Uploaded via Flutter app',
-            onProgress: (progress) => _uploadProgressNotifiers[asset.id]?.value = progress,
-          );
-
-          if (videoId != null) {
-            _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
-            _uploadedVideoIds.add(asset.id);
-            await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
-          } else {
-            _uploadStatusNotifiers[asset.id]?.value = 'Failed';
-          }
-        } catch (e) {
-          _uploadStatusNotifiers[asset.id]?.value = 'Failed: $e';
-        }
+      final file = await asset.file;
+      if (file == null) {
+        _uploadStatusNotifiers[asset.id]?.value = 'Failed (No file)';
+        continue;
       }
 
-      setState(() {
-        _loading = false;
-        _selectedVideos.clear();
-      });
+      final name = file.path.split('/').last;
+      final bytes = await file.readAsBytes();
+
+      try {
+        final videoId = await uploader.uploadResumable(
+          videoBytes: bytes,
+          title: name,
+          description: 'Uploaded via Flutter app',
+          onProgress: (progress) => _uploadProgressNotifiers[asset.id]?.value = progress,
+        );
+
+        if (videoId != null) {
+          _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
+          _uploadedVideoIds.add(asset.id);
+          await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
+        } else {
+          _uploadStatusNotifiers[asset.id]?.value = 'Failed';
+        }
+      } catch (e) {
+        _uploadStatusNotifiers[asset.id]?.value = 'Failed: $e';
+      }
     }
+
+    setState(() {
+      _loading = false;
+      _selectedVideos.clear();
+    });
+  }
 
   Widget _buildGridItem(AssetEntity video) {
     final isSelected = _selectedVideos.contains(video);
@@ -246,12 +218,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
           FutureBuilder<Uint8List?>(
             future: video.thumbnailDataWithSize(ThumbnailSize(200, 200)),
             builder: (_, snap) => snap.hasData
-                ? Image.memory(
-                    snap.data!,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                  )
+                ? Image.memory(snap.data!, fit: BoxFit.cover, width: double.infinity, height: double.infinity)
                 : Container(color: Colors.grey[300]),
           ),
           if (isUploaded)
@@ -280,8 +247,9 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
                 children: [
                   ValueListenableBuilder<double>(
                     valueListenable: _uploadProgressNotifiers[video.id]!,
-                    builder: (_, progress, __) =>
-                        progress > 0 ? LinearProgressIndicator(value: progress) : const SizedBox.shrink(),
+                    builder: (_, progress, __) => progress > 0
+                        ? LinearProgressIndicator(value: progress)
+                        : const SizedBox.shrink(),
                   ),
                   ValueListenableBuilder<String>(
                     valueListenable: _uploadStatusNotifiers[video.id]!,
@@ -301,6 +269,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     );
   }
 
+  /// --- UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -340,7 +309,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
                 ? null
                 : () {
                     if (kIsWeb) {
-                      pickVideosWebAndUpload();
+                      _uploadSelectedVideosWeb();
                     } else {
                       _uploadSelectedVideos();
                     }
@@ -350,15 +319,41 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
       ),
       backgroundColor: Colors.black,
       body: kIsWeb
-            ? Center(
-                  child: ElevatedButton.icon(
-                    icon: Icon(Icons.upload_file),
-                    label: Text('Pick & Upload Videos'),
-                    onPressed: _loading ? null : _uploadSelectedVideosWeb,
+          ? Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Pick & Upload Videos'),
+                  onPressed: _loading ? null : _uploadSelectedVideosWeb,
+                ),
+                const SizedBox(height: 20),
+                Expanded(
+                  child: ListView(
+                    children: _uploadProgressNotifiers.keys.map((fileName) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(fileName, style: const TextStyle(color: Colors.white)),
+                          ValueListenableBuilder<double>(
+                            valueListenable: _uploadProgressNotifiers[fileName]!,
+                            builder: (_, progress, __) =>
+                                LinearProgressIndicator(value: progress, minHeight: 5),
+                          ),
+                          ValueListenableBuilder<String>(
+                            valueListenable: _uploadStatusNotifiers[fileName]!,
+                            builder: (_, status, __) => Text(status,
+                                style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                      );
+                    }).toList(),
                   ),
-                )
-            : 
-          _videos.isEmpty
+                ),
+              ],
+            )
+          : _videos.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : GridView.builder(
                   padding: const EdgeInsets.all(8),
@@ -374,7 +369,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   }
 }
 
-/// YouTubeUploader
+/// --- YOUTUBE UPLOADER CLASS ---
 class YouTubeUploader {
   static const String _uploadInitiationUrl =
       'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
@@ -446,7 +441,6 @@ class YouTubeUploader {
           onProgress(offset / totalSize);
           retries = 0;
         } else {
-          // throw HttpException('Unexpected status code: ${uploadRes.statusCode}', uri: Uri.parse(uploadUrl));
           throw Exception('Unexpected status code: ${uploadRes.statusCode}');
         }
       } catch (e) {
