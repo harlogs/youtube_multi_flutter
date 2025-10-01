@@ -104,6 +104,51 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     return reader.result as Uint8List?;
   }
 
+  Future<void> _uploadSelectedVideosWeb() async {
+  if (widget.accessToken == null || widget.channelId == null) return;
+  setState(() => _loading = true);
+
+  final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
+
+  // Open the file picker
+  final files = await pickVideosWeb();
+  if (files.isEmpty) {
+    setState(() => _loading = false);
+    return;
+  }
+
+  for (final file in files) {
+    final bytes = await readVideoBytes(file);
+    if (bytes == null) continue;
+
+    final name = file.name;
+
+    // Initialize progress and status notifiers
+    _uploadProgressNotifiers.putIfAbsent(name, () => ValueNotifier<double>(0));
+    _uploadStatusNotifiers.putIfAbsent(name, () => ValueNotifier<String>('Uploading...'));
+
+    try {
+      final videoId = await uploader.uploadResumable(
+        videoBytes: bytes,
+        title: name,
+        description: 'Uploaded via Flutter web app',
+        onProgress: (progress) => _uploadProgressNotifiers[name]?.value = progress,
+      );
+
+      if (videoId != null) {
+        _uploadStatusNotifiers[name]?.value = 'Uploaded';
+      } else {
+        _uploadStatusNotifiers[name]?.value = 'Failed';
+      }
+    } catch (e) {
+      _uploadStatusNotifiers[name]?.value = 'Failed: $e';
+    }
+  }
+
+  setState(() => _loading = false);
+}
+
+
   Future<void> pickVideosWebAndUpload() async {
     if (widget.accessToken == null || widget.channelId == null) return;
 
@@ -130,53 +175,53 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     }
   }
 
-  Future<void> _uploadSelectedVideos() async {
-    if (widget.accessToken == null || widget.channelId == null) return;
-    setState(() => _loading = true);
+    Future<void> _uploadSelectedVideos() async {
+      if (widget.accessToken == null || widget.channelId == null) return;
+      setState(() => _loading = true);
 
-    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
+      final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
 
-    for (final asset in _selectedVideos) {
-      if (_uploadedVideoIds.contains(asset.id)) continue;
+      for (final asset in _selectedVideos) {
+        if (_uploadedVideoIds.contains(asset.id)) continue;
 
-      _initNotifiersForVideo(asset.id);
-      _uploadStatusNotifiers[asset.id]?.value = 'Uploading...';
-      _uploadProgressNotifiers[asset.id]?.value = 0;
+        _initNotifiersForVideo(asset.id);
+        _uploadStatusNotifiers[asset.id]?.value = 'Uploading...';
+        _uploadProgressNotifiers[asset.id]?.value = 0;
 
-      final file = await asset.file;
-      if (file == null) {
-        _uploadStatusNotifiers[asset.id]?.value = 'Failed (No file)';
-        continue;
-      }
-
-      final name = file.path.split('/').last;
-      final bytes = await file.readAsBytes();
-
-      try {
-        final videoId = await uploader.uploadResumable(
-          videoBytes: bytes,
-          title: name,
-          description: 'Uploaded via Flutter app',
-          onProgress: (progress) => _uploadProgressNotifiers[asset.id]?.value = progress,
-        );
-
-        if (videoId != null) {
-          _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
-          _uploadedVideoIds.add(asset.id);
-          await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
-        } else {
-          _uploadStatusNotifiers[asset.id]?.value = 'Failed';
+        final file = await asset.file;
+        if (file == null) {
+          _uploadStatusNotifiers[asset.id]?.value = 'Failed (No file)';
+          continue;
         }
-      } catch (e) {
-        _uploadStatusNotifiers[asset.id]?.value = 'Failed: $e';
-      }
-    }
 
-    setState(() {
-      _loading = false;
-      _selectedVideos.clear();
-    });
-  }
+        final name = file.path.split('/').last;
+        final bytes = await file.readAsBytes();
+
+        try {
+          final videoId = await uploader.uploadResumable(
+            videoBytes: bytes,
+            title: name,
+            description: 'Uploaded via Flutter app',
+            onProgress: (progress) => _uploadProgressNotifiers[asset.id]?.value = progress,
+          );
+
+          if (videoId != null) {
+            _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
+            _uploadedVideoIds.add(asset.id);
+            await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
+          } else {
+            _uploadStatusNotifiers[asset.id]?.value = 'Failed';
+          }
+        } catch (e) {
+          _uploadStatusNotifiers[asset.id]?.value = 'Failed: $e';
+        }
+      }
+
+      setState(() {
+        _loading = false;
+        _selectedVideos.clear();
+      });
+    }
 
   Widget _buildGridItem(AssetEntity video) {
     final isSelected = _selectedVideos.contains(video);
@@ -296,17 +341,12 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
       backgroundColor: Colors.black,
       body: kIsWeb
             ? Center(
-                child: ElevatedButton.icon(
-                  onPressed: pickVideosWebAndUpload,
-                  icon: const Icon(Icons.cloud_upload),
-                  label: const Text('Pick & Upload Videos'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    textStyle: const TextStyle(fontSize: 16),
+                  child: ElevatedButton.icon(
+                    icon: Icon(Icons.upload_file),
+                    label: Text('Pick & Upload Videos'),
+                    onPressed: _loading ? null : _uploadSelectedVideosWeb,
                   ),
-                ),
-              )
+                )
             : 
           _videos.isEmpty
               ? const Center(child: CircularProgressIndicator())
