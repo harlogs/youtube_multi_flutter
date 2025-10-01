@@ -280,7 +280,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
           if (!kIsWeb) IconButton(icon: const Icon(Icons.select_all), onPressed: _selectAll),
           if (!kIsWeb) IconButton(icon: const Icon(Icons.check_box), onPressed: _markSelectedAsUploaded),
           IconButton(
-            icon: const Icon(Icons.cloud_upload),
+            icon: const Icon(Icons.cloud_upload, color: Colors.black),
             onPressed: _loading
                 ? null
                 : () {
