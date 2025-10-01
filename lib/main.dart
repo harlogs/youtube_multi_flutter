@@ -7,6 +7,7 @@ import 'MultiVideoPickerUploadPage.dart';
 import 'package:flutter_web_auth/flutter_web_auth.dart';
 import 'dart:convert'; // for jsonDecode
 import 'package:http/http.dart' as http; 
+import 'package:shared_preferences/shared_preferences.dart';
 // import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'dart:io' show Platform;
 
@@ -140,6 +141,12 @@ class _MyAppState extends State<MyApp> {
 
     final fragment = Uri.parse(result).fragment;
     final accessToken = Uri.splitQueryString(fragment)['access_token'];
+
+    final prefs = await SharedPreferences.getInstance();
+    if (accessToken != null) {
+      await prefs.setString('access_token', accessToken);
+    }
+    // await prefs.setString('access_token', accessToken);
 
     setState(() {
       _accessToken = accessToken;
