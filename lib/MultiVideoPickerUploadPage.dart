@@ -86,15 +86,25 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     _uploadStatusNotifiers.putIfAbsent(id, () => ValueNotifier<String>(''));
   }
 
-  /// Web file picker
   Future<List<html.File>> pickVideosWeb() async {
+    final completer = Completer<List<html.File>>();
+
     final input = html.FileUploadInputElement()
       ..accept = 'video/*'
       ..multiple = true;
+
+    // Must add this to DOM so that browser allows the picker
+    html.document.body!.append(input);
+
+    input.onChange.listen((event) {
+      final files = input.files;
+      completer.complete(files?.toList() ?? []);
+      input.remove(); // Remove after selection
+    });
+
     input.click();
-    await input.onChange.first;
-    if (input.files == null) return [];
-    return input.files!;
+
+    return completer.future;
   }
 
   Future<Uint8List?> readVideoBytes(html.File file) async {
