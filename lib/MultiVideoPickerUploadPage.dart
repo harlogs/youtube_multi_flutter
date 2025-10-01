@@ -294,10 +294,20 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
         ],
       ),
       backgroundColor: Colors.black,
-      body: 
-      // kIsWeb
-      //     ? const Center(child: Text('Use the upload button to pick videos', style: TextStyle(color: Colors.white)))
-      //     : 
+      body: kIsWeb
+            ? Center(
+                child: ElevatedButton.icon(
+                  onPressed: pickVideosWebAndUpload,
+                  icon: const Icon(Icons.cloud_upload),
+                  label: const Text('Pick & Upload Videos'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    textStyle: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              )
+            : 
           _videos.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : GridView.builder(
