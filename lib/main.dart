@@ -114,15 +114,15 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _handleSignIn() async {
-    if (kIsWeb) {
-      await _handleSignInWeb();
-    } else {
+    // if (kIsWeb) {
+    //   await _handleSignInWeb();
+    // } else {
       try {
         await _googleSignIn.signIn();
       } catch (error) {
         print('Sign in failed: $error');
       }
-    }
+    // }
   }
 
   Future<void> _handleSignInWeb() async {

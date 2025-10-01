@@ -1,0 +1,39 @@
+name: Flutter Web Build & Deploy
+
+on:
+  push:
+    branches:
+      - main  # change if your default branch is different
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.13.7'  # change to your Flutter version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Delete old docs folder
+        run: rm -rf docs
+
+      - name: Build Flutter web
+        run: flutter build web --release
+
+      - name: Copy build/web to docs
+        run: cp -r build/web docs
+
+      - name: Commit & push docs folder
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions"
+          git add docs
+          git commit -m "Rebuild Flutter Web docs folder [skip ci]" || echo "No changes to commit"
+          git push
