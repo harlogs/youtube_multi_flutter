@@ -1,22 +1,31 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:io' show File;
-import 'dart:html' as html;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 
 import 'main.dart';
+import 'youtube_uploader.dart';
+import 'video_picker.dart';
 
 class MultiVideoPickerUploadPage extends StatefulWidget {
   final String? accessToken;
   final String? channelId;
+  final String userDisplayName;
+  final String userEmail;
+  final String userPhotoUrl;
 
-  const MultiVideoPickerUploadPage({Key? key, this.accessToken, this.channelId}) : super(key: key);
+  const MultiVideoPickerUploadPage({
+    Key? key,
+    this.accessToken,
+    this.channelId,
+    this.userDisplayName = '',
+    this.userEmail = '',
+    this.userPhotoUrl = '',
+  }) : super(key: key);
 
   @override
   _MultiVideoPickerUploadPageState createState() => _MultiVideoPickerUploadPageState();
@@ -26,8 +35,11 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   List<AssetEntity> _videos = [];
   Set<AssetEntity> _selectedVideos = {};
   Set<String> _uploadedVideoIds = {};
+  Set<String> _youtubeVideoTitles = {};
   late SharedPreferences _prefs;
   bool _loading = false;
+  bool _syncingYoutube = false;
+  int _todayUploadCount = 0;
 
   final Map<String, ValueNotifier<double>> _uploadProgressNotifiers = {};
   final Map<String, ValueNotifier<String>> _uploadStatusNotifiers = {};
@@ -41,7 +53,63 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   Future<void> _initPrefsAndVideos() async {
     _prefs = await SharedPreferences.getInstance();
     _uploadedVideoIds = _prefs.getStringList('uploadedVideoIds')?.toSet() ?? {};
-    if (!kIsWeb) await _fetchVideos();
+    _todayUploadCount = _computeTodayCount();
+    if (!kIsWeb) {
+      await _fetchVideos();
+      unawaited(_fetchYoutubeUploads());
+    }
+  }
+
+  int _computeTodayCount() {
+    final dates = _prefs.getStringList('uploadDates') ?? [];
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    return dates.where((d) => d.startsWith(today)).length;
+  }
+
+  Future<void> _recordUpload() async {
+    final dates = _prefs.getStringList('uploadDates') ?? [];
+    dates.add(DateTime.now().toIso8601String());
+    await _prefs.setStringList('uploadDates', dates);
+    setState(() => _todayUploadCount = _computeTodayCount());
+  }
+
+  Future<void> _fetchYoutubeUploads() async {
+    final token = widget.accessToken;
+    if (token == null) return;
+    setState(() => _syncingYoutube = true);
+
+    try {
+      final channelRes = await http.get(
+        Uri.parse('https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (channelRes.statusCode != 200) return;
+      final channelData = jsonDecode(channelRes.body);
+      final uploadsId = channelData['items']?[0]?['contentDetails']?['relatedPlaylists']?['uploads'] as String?;
+      if (uploadsId == null) return;
+
+      final titles = <String>{};
+      String? nextPage;
+      do {
+        final url = 'https://www.googleapis.com/youtube/v3/playlistItems'
+            '?part=snippet&playlistId=$uploadsId&maxResults=50'
+            '${nextPage != null ? '&pageToken=$nextPage' : ''}';
+        final res = await http.get(Uri.parse(url), headers: {'Authorization': 'Bearer $token'});
+        if (res.statusCode != 200) break;
+        final data = jsonDecode(res.body);
+        for (final item in data['items'] ?? []) {
+          final title = item['snippet']?['title'] as String?;
+          if (title != null) titles.add(title.trim());
+        }
+        nextPage = data['nextPageToken'] as String?;
+      } while (nextPage != null);
+
+      if (mounted) setState(() => _youtubeVideoTitles = titles);
+    } catch (_) {
+      // Silently fail — YouTube sync is best-effort
+    } finally {
+      if (mounted) setState(() => _syncingYoutube = false);
+    }
   }
 
   Future<void> _fetchVideos() async {
@@ -58,11 +126,28 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     setState(() => _videos = uniqueVideos);
   }
 
+  bool _isOnYoutube(AssetEntity video) {
+    final id = video.id;
+    if (_uploadedVideoIds.contains(id)) return true;
+
+    final title = _videoTitleFor(video);
+    return title != null && _youtubeVideoTitles.contains(title);
+  }
+
+  String? _videoTitleFor(AssetEntity video) {
+    final id = video.id;
+    for (final v in _videos) {
+      if (v.id == id) return v.title;
+    }
+    return null;
+  }
+
   void _toggleSelect(AssetEntity video) {
+    if (_isOnYoutube(video)) return;
     setState(() {
       if (_selectedVideos.contains(video)) {
         _selectedVideos.remove(video);
-      } else if (!_uploadedVideoIds.contains(video.id)) {
+      } else {
         _selectedVideos.add(video);
       }
     });
@@ -70,7 +155,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
 
   void _selectAll() {
     setState(() {
-      _selectedVideos = _videos.where((v) => !_uploadedVideoIds.contains(v.id)).toSet();
+      _selectedVideos = _videos.where((v) => !_isOnYoutube(v)).toSet();
     });
   }
 
@@ -87,50 +172,33 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     _uploadStatusNotifiers.putIfAbsent(id, () => ValueNotifier<String>(''));
   }
 
-  /// --- WEB ONLY ---
-  Future<List<html.File>> pickVideosWeb() async {
-    final completer = Completer<List<html.File>>();
-
-    final input = html.FileUploadInputElement()
-      ..accept = 'video/*'
-      ..multiple = true;
-
-    html.document.body!.append(input);
-
-    input.onChange.listen((event) {
-      final files = input.files;
-      completer.complete(files?.toList() ?? []);
-      input.remove();
-    });
-
-    input.click();
-    return completer.future;
-  }
-
-  Future<Uint8List?> readVideoBytes(html.File file) async {
-    final reader = html.FileReader();
-    reader.readAsArrayBuffer(file);
-    await reader.onLoad.first;
-    return reader.result as Uint8List?;
+  void _showSnackBar(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: Colors.red,
+      duration: const Duration(seconds: 3),
+    ));
   }
 
   Future<void> _uploadSelectedVideosWeb() async {
-    if (widget.accessToken == null || widget.channelId == null) return;
+    if (widget.accessToken == null) return;
     setState(() => _loading = true);
 
-    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
+    final channelId = widget.channelId ?? '';
+    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: channelId);
 
-    final files = await pickVideosWeb();
+    final files = await pickVideosWebImpl();
     if (files.isEmpty) {
       setState(() => _loading = false);
       return;
     }
 
     for (final file in files) {
-      final bytes = await readVideoBytes(file);
+      final bytes = await readVideoBytesImpl(file);
       if (bytes == null) continue;
 
-      final name = file.name;
+      final name = file is Map ? (file['name'] as String? ?? 'video') : (file as dynamic).name?.toString() ?? 'video';
 
       _uploadProgressNotifiers.putIfAbsent(name, () => ValueNotifier<double>(0));
       _uploadStatusNotifiers.putIfAbsent(name, () => ValueNotifier<String>('Uploading...'));
@@ -156,12 +224,19 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     setState(() => _loading = false);
   }
 
-  /// --- MOBILE ONLY ---
   Future<void> _uploadSelectedVideos() async {
-    if (widget.accessToken == null || widget.channelId == null) return;
+    if (widget.accessToken == null) {
+      _showSnackBar('No access token. Please sign in again.');
+      return;
+    }
+    if (_selectedVideos.isEmpty) {
+      _showSnackBar('Select at least one video first.');
+      return;
+    }
     setState(() => _loading = true);
 
-    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: widget.channelId!);
+    final channelId = widget.channelId ?? '';
+    final uploader = YouTubeUploader(widget.accessToken!, selectedChannelId: channelId);
 
     for (final asset in _selectedVideos) {
       if (_uploadedVideoIds.contains(asset.id)) continue;
@@ -191,6 +266,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
           _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
           _uploadedVideoIds.add(asset.id);
           await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
+          await _recordUpload();
         } else {
           _uploadStatusNotifiers[asset.id]?.value = 'Failed';
         }
@@ -205,9 +281,82 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     });
   }
 
+  Widget _buildDrawer() {
+    return Drawer(
+      child: Column(
+        children: [
+          UserAccountsDrawerHeader(
+            decoration: const BoxDecoration(color: Colors.black87),
+            accountName: Text(
+              widget.userDisplayName.isNotEmpty ? widget.userDisplayName : 'User',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            accountEmail: Text(widget.userEmail),
+            currentAccountPicture: CircleAvatar(
+              backgroundImage: widget.userPhotoUrl.isNotEmpty
+                  ? NetworkImage(widget.userPhotoUrl)
+                  : null,
+              child: widget.userPhotoUrl.isEmpty ? const Icon(Icons.person, size: 40) : null,
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.today),
+            title: const Text("Today's Uploads"),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.green,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '$_todayUploadCount',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.cloud_upload),
+            title: const Text('Total Uploads'),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blueGrey,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${_uploadedVideoIds.length}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+          const Spacer(),
+          ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Logout'),
+            onTap: () async {
+              await googleSignIn.signOut();
+              if (!context.mounted) return;
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => MainShell()),
+                (_) => false,
+              );
+            },
+          ),
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'Version 0.0.1',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildGridItem(AssetEntity video) {
     final isSelected = _selectedVideos.contains(video);
-    final isUploaded = _uploadedVideoIds.contains(video.id);
+    final onYoutube = _isOnYoutube(video);
 
     _initNotifiersForVideo(video.id);
 
@@ -221,24 +370,24 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
                 ? Image.memory(snap.data!, fit: BoxFit.cover, width: double.infinity, height: double.infinity)
                 : Container(color: Colors.grey[300]),
           ),
-          if (isUploaded)
+          if (onYoutube)
             Positioned(
               top: 4,
               left: 4,
               child: Container(
-                color: Colors.green,
-                padding: const EdgeInsets.all(2),
-                child: const Text('Uploaded', style: TextStyle(color: Colors.white, fontSize: 10)),
+                color: Colors.orange,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: const Text('On YouTube', style: TextStyle(color: Colors.white, fontSize: 9)),
               ),
             ),
-          if (isSelected && !isUploaded)
+          if (isSelected && !onYoutube)
             Container(
               decoration: BoxDecoration(
                 color: Colors.black38,
                 border: Border.all(color: Colors.greenAccent, width: 3),
               ),
             ),
-          if (!isUploaded)
+          if (!onYoutube)
             Positioned(
               bottom: 0,
               left: 0,
@@ -269,36 +418,21 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
     );
   }
 
-  /// --- UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(color: Colors.black87),
-              child: Text('Menu', style: TextStyle(color: Colors.white, fontSize: 24)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_library),
-              title: const Text('My Videos'),
-              onTap: () {},
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Logout'),
-              onTap: () {
-                GoogleSignIn().signOut();
-                Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => MyApp()), (_) => false);
-              },
-            ),
-          ],
-        ),
-      ),
+      drawer: _buildDrawer(),
       appBar: AppBar(
-        title: const Text('Pick & Upload Videos'),
+        title: _syncingYoutube
+            ? const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Home'),
+                  SizedBox(width: 8),
+                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                ],
+              )
+            : const Text('Home'),
         actions: [
           if (!kIsWeb) IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchVideos),
           if (!kIsWeb) IconButton(icon: const Icon(Icons.select_all), onPressed: _selectAll),
@@ -354,7 +488,18 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
               ],
             )
           : _videos.isEmpty
-              ? const Center(child: CircularProgressIndicator())
+              ? Center(
+                  child: _syncingYoutube
+                      ? const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 12),
+                            Text('Syncing with YouTube...', style: TextStyle(color: Colors.grey)),
+                          ],
+                        )
+                      : const CircularProgressIndicator(),
+                )
               : GridView.builder(
                   padding: const EdgeInsets.all(8),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -366,90 +511,5 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
                   itemBuilder: (_, i) => _buildGridItem(_videos[i]),
                 ),
     );
-  }
-}
-
-/// --- YOUTUBE UPLOADER CLASS ---
-class YouTubeUploader {
-  static const String _uploadInitiationUrl =
-      'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
-  static const int _chunkSize = 1024 * 1024 * 5; // 5 MB
-  static const int _maxRetries = 5;
-
-  final String accessToken;
-  final String selectedChannelId;
-
-  YouTubeUploader(this.accessToken, {required this.selectedChannelId});
-
-  Future<String?> uploadResumable({
-    required Uint8List videoBytes,
-    required String title,
-    String description = '',
-    required Function(double) onProgress,
-  }) async {
-    final totalSize = videoBytes.length;
-
-    final initRes = await http.post(
-      Uri.parse(_uploadInitiationUrl),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json; charset=UTF-8',
-        'X-Upload-Content-Type': 'video/*',
-        'X-Upload-Content-Length': totalSize.toString(),
-      },
-      body: jsonEncode({
-        'snippet': {
-          'title': title,
-          'description': description,
-          'channelId': selectedChannelId,
-        },
-        'status': {'privacyStatus': 'private'},
-      }),
-    );
-
-    if (initRes.statusCode != 200) throw Exception('Failed to initiate upload: ${initRes.body}');
-
-    final uploadUrl = initRes.headers['location'];
-    if (uploadUrl == null) throw Exception('Upload session URL not returned');
-
-    int offset = 0;
-    int retries = 0;
-
-    while (offset < totalSize) {
-      final end = (offset + _chunkSize) > totalSize ? totalSize : (offset + _chunkSize);
-      final chunk = videoBytes.sublist(offset, end);
-      final chunkLength = chunk.length;
-      final rangeHeader = 'bytes $offset-${offset + chunkLength - 1}/$totalSize';
-
-      try {
-        final uploadRes = await http.put(
-          Uri.parse(uploadUrl),
-          headers: {
-            'Authorization': 'Bearer $accessToken',
-            'Content-Length': chunkLength.toString(),
-            'Content-Type': 'video/*',
-            'Content-Range': rangeHeader,
-          },
-          body: chunk,
-        );
-
-        if (uploadRes.statusCode == 200 || uploadRes.statusCode == 201) {
-          final resBody = jsonDecode(uploadRes.body);
-          return resBody['id'];
-        } else if (uploadRes.statusCode == 308) {
-          offset += chunkLength;
-          onProgress(offset / totalSize);
-          retries = 0;
-        } else {
-          throw Exception('Unexpected status code: ${uploadRes.statusCode}');
-        }
-      } catch (e) {
-        retries++;
-        if (retries >= _maxRetries) rethrow;
-        await Future.delayed(Duration(seconds: 2 * retries));
-      }
-    }
-
-    throw Exception('Upload failed after maximum retries');
   }
 }

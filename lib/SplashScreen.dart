@@ -33,7 +33,7 @@ class _SplashScreenState extends State<SplashScreen> {
             Icon(Icons.ondemand_video, size: 100, color: Colors.redAccent),
             const SizedBox(height: 20),
             Text(
-              'Youtube Multi',
+              'Backup',
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
