@@ -4,9 +4,10 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:intl/intl.dart';
 import 'main.dart';
 import 'youtube_uploader.dart';
 import 'video_picker.dart';
@@ -36,10 +37,13 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   Set<AssetEntity> _selectedVideos = {};
   Set<String> _uploadedVideoIds = {};
   Set<String> _youtubeVideoTitles = {};
-  late SharedPreferences _prefs;
+  static const _storage = FlutterSecureStorage();
+  List<String> _uploadDates = [];
   bool _loading = false;
   bool _syncingYoutube = false;
   int _todayUploadCount = 0;
+  final ScrollController _scrollController = ScrollController();
+  String _currentHeaderDate = '';
 
   final Map<String, ValueNotifier<double>> _uploadProgressNotifiers = {};
   final Map<String, ValueNotifier<String>> _uploadStatusNotifiers = {};
@@ -47,12 +51,26 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _initPrefsAndVideos();
   }
 
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _initPrefsAndVideos() async {
-    _prefs = await SharedPreferences.getInstance();
-    _uploadedVideoIds = _prefs.getStringList('uploadedVideoIds')?.toSet() ?? {};
+    final idsJson = await _storage.read(key: 'uploadedVideoIds');
+    if (idsJson != null) {
+      _uploadedVideoIds = (jsonDecode(idsJson) as List).cast<String>().toSet();
+    }
+    final datesJson = await _storage.read(key: 'uploadDates');
+    if (datesJson != null) {
+      _uploadDates = (jsonDecode(datesJson) as List).cast<String>();
+    }
     _todayUploadCount = _computeTodayCount();
     if (!kIsWeb) {
       await _fetchVideos();
@@ -61,15 +79,28 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
   }
 
   int _computeTodayCount() {
-    final dates = _prefs.getStringList('uploadDates') ?? [];
     final today = DateTime.now().toIso8601String().substring(0, 10);
-    return dates.where((d) => d.startsWith(today)).length;
+    return _uploadDates.where((d) => d.startsWith(today)).length;
+  }
+
+  void _onScroll() {
+    if (_videos.isEmpty) return;
+    final viewportWidth = MediaQuery.of(context).size.width;
+    final itemWidth = (viewportWidth - 40) / 4;
+    final rowHeight = itemWidth + 8;
+    final totalRows = (_videos.length / 4).ceil();
+    final row = ((_scrollController.offset - 8) / rowHeight).floor().clamp(0, totalRows - 1);
+    final index = (row * 4).clamp(0, _videos.length - 1);
+    final date = _videos[index].createDateTime;
+    final formatted = DateFormat('MMM d, yyyy').format(date);
+    if (formatted != _currentHeaderDate) {
+      setState(() => _currentHeaderDate = formatted);
+    }
   }
 
   Future<void> _recordUpload() async {
-    final dates = _prefs.getStringList('uploadDates') ?? [];
-    dates.add(DateTime.now().toIso8601String());
-    await _prefs.setStringList('uploadDates', dates);
+    _uploadDates.add(DateTime.now().toIso8601String());
+    await _storage.write(key: 'uploadDates', value: jsonEncode(_uploadDates));
     setState(() => _todayUploadCount = _computeTodayCount());
   }
 
@@ -123,7 +154,13 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
       allVideos.addAll(videos);
     }
     final uniqueVideos = {for (var v in allVideos) v.id: v}.values.toList();
-    setState(() => _videos = uniqueVideos);
+    uniqueVideos.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+    setState(() {
+      _videos = uniqueVideos;
+      if (uniqueVideos.isNotEmpty) {
+        _currentHeaderDate = DateFormat('MMM d, yyyy').format(uniqueVideos.first.createDateTime);
+      }
+    });
   }
 
   bool _isOnYoutube(AssetEntity video) {
@@ -164,7 +201,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
       _uploadedVideoIds.addAll(_selectedVideos.map((v) => v.id));
       _selectedVideos.clear();
     });
-    await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
+    await _storage.write(key: 'uploadedVideoIds', value: jsonEncode(_uploadedVideoIds.toList()));
   }
 
   void _initNotifiersForVideo(String id) {
@@ -265,7 +302,7 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
         if (videoId != null) {
           _uploadStatusNotifiers[asset.id]?.value = 'Uploaded';
           _uploadedVideoIds.add(asset.id);
-          await _prefs.setStringList('uploadedVideoIds', _uploadedVideoIds.toList());
+await _storage.write(key: 'uploadedVideoIds', value: jsonEncode(_uploadedVideoIds.toList()));
           await _recordUpload();
         } else {
           _uploadStatusNotifiers[asset.id]?.value = 'Failed';
@@ -427,12 +464,19 @@ class _MultiVideoPickerUploadPageState extends State<MultiVideoPickerUploadPage>
             ? const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Home'),
+                  Text('Library'),
                   SizedBox(width: 8),
                   SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                 ],
               )
-            : const Text('Home'),
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Library', style: TextStyle(fontSize: 18)),
+                  if (_currentHeaderDate.isNotEmpty)
+                    Text(_currentHeaderDate, style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+                ],
+              ),
         actions: [
           if (!kIsWeb) IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchVideos),
           if (!kIsWeb) IconButton(icon: const Icon(Icons.select_all), onPressed: _selectAll),

@@ -13,6 +13,7 @@ dependencies:
   google_sign_in: ^6.1.5
   http: ^0.13.4
   shared_preferences: ^2.0.15
+  flutter_secure_storage: ^9.2.4
   photo_manager: ^3.7.1
   fluttertoast: ^8.2.4
   flutter_web_auth: ^0.6.0

@@ -58,7 +58,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       });
       await _controller?.loadUrl(
         urlRequest: URLRequest(
-          url: WebUri('https://www.youtube.com/watch?v=${widget.videoId}'),
+          url: WebUri('https://www.youtube.com/shorts/${widget.videoId}'),
         ),
       );
     }
@@ -157,7 +157,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       children: [
         InAppWebView(
           initialUrlRequest: URLRequest(
-            url: WebUri('https://www.youtube.com/watch?v=${widget.videoId}'),
+          url: WebUri('https://www.youtube.com/shorts/${widget.videoId}'),
           ),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,

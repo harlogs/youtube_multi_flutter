@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'background_service.dart';
 
@@ -73,9 +73,9 @@ class UploadJob {
 class UploadScheduler extends ChangeNotifier {
   static const int dailyLimit = 15;
   static const String _storageKey = 'upload_queue';
+  static const _storage = FlutterSecureStorage();
 
   List<UploadJob> _jobs = [];
-  SharedPreferences? _prefs;
 
   List<UploadJob> get jobs => List.unmodifiable(_jobs);
   int get totalCount => _jobs.length;
@@ -118,12 +118,11 @@ class UploadScheduler extends ChangeNotifier {
       _jobs.where((j) => j.status == JobStatus.failed).toList();
 
   Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
     await load();
   }
 
   Future<void> load() async {
-    final data = _prefs?.getString(_storageKey);
+    final data = await _storage.read(key: _storageKey);
     if (data == null) return;
     final list = jsonDecode(data) as List;
     _jobs = list.map((e) => UploadJob.fromJson(e as Map<String, dynamic>)).toList();
@@ -133,7 +132,7 @@ class UploadScheduler extends ChangeNotifier {
 
   Future<void> _save() async {
     final data = jsonEncode(_jobs.map((j) => j.toJson()).toList());
-    await _prefs?.setString(_storageKey, data);
+    await _storage.write(key: _storageKey, value: data);
     unawaited(updateBadgeCount(pendingCount + uploadingCount));
   }
 

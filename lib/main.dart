@@ -20,7 +20,7 @@ void main() async {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         scaffoldBackgroundColor: Colors.black,
-        appBarTheme: AppBarTheme(backgroundColor: Colors.grey[900], elevation: 0, foregroundColor: Colors.white, centerTitle: false),
+        appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: Colors.white, centerTitle: false),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
         ),
@@ -62,7 +62,7 @@ class _MainShellState extends State<MainShell> {
   late final AccountManager _accountManager;
   late final UploadScheduler _scheduler;
   bool _initialized = false;
-  int _currentTab = 0;
+  final PageController _pageCtrl = PageController();
 
   @override
   void initState() {
@@ -93,6 +93,7 @@ class _MainShellState extends State<MainShell> {
     _accountManager.removeListener(_onAccountChanged);
     _scheduler.removeListener(_onSchedulerChanged);
     _scheduler.dispose();
+    _pageCtrl.dispose();
     super.dispose();
   }
 
@@ -122,8 +123,7 @@ class _MainShellState extends State<MainShell> {
   Widget _buildSignInScreen() {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('YouTube Multi Uploader', style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.black,
+        title: const Text('YouTube Multi Uploader'),
       ),
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -231,20 +231,9 @@ class _MainShellState extends State<MainShell> {
 
     return Scaffold(
       drawer: _buildDrawer(),
-      body: IndexedStack(index: _currentTab, children: pages),
-      bottomNavigationBar: Theme(
-        data: Theme.of(context).copyWith(canvasColor: Colors.grey[900]),
-        child: BottomNavigationBar(
-          currentIndex: _currentTab,
-          onTap: (i) => setState(() => _currentTab = i),
-          selectedItemColor: Colors.green,
-          unselectedItemColor: Colors.grey[600],
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.cloud_upload_outlined), activeIcon: Icon(Icons.cloud_upload), label: 'Upload'),
-            BottomNavigationBarItem(icon: Icon(Icons.video_library_outlined), activeIcon: Icon(Icons.video_library), label: 'Browse'),
-            BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'Account'),
-          ],
-        ),
+      body: PageView(
+        controller: _pageCtrl,
+        children: pages,
       ),
     );
   }

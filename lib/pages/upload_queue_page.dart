@@ -31,17 +31,24 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
   List<AssetEntity> _galleryVideos = [];
   Set<AssetEntity> _selectedForQueue = {};
   bool _showPicker = true;
+  final ScrollController _scrollCtrl = ScrollController();
+  ValueNotifier<String?> _headerDateNotifier = ValueNotifier(null);
 
   @override
   void initState() {
     super.initState();
     widget.scheduler.addListener(_onSchedulerChanged);
+    _scrollCtrl.addListener(_updateCurrentMonth);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateCurrentMonth());
     _loadGallery();
   }
 
   @override
   void dispose() {
     widget.scheduler.removeListener(_onSchedulerChanged);
+    _scrollCtrl.removeListener(_updateCurrentMonth);
+    _scrollCtrl.dispose();
+    _headerDateNotifier.dispose();
     super.dispose();
   }
 
@@ -59,9 +66,13 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
       all.addAll(await album.getAssetListPaged(page: 0, size: 500));
     }
     if (mounted) {
-      setState(() => _galleryVideos = {for (final v in all) v.id: v}.values.toList());
+      final videos = {for (final v in all) v.id: v}.values.toList();
+      videos.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+      setState(() {
+        _galleryVideos = videos;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updateCurrentMonth());
     }
-    // Start/resume upload processing after gallery is ready
     _processNextIfNeeded();
   }
 
@@ -72,7 +83,15 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
     final email = widget.accountManager.currentAccount?.email ?? '';
     final now = DateTime.now();
     final titleFmt = DateFormat('dd MMMM yyyy HH:mm');
-    final items = _selectedForQueue.toList();
+    final filtered = _selectedForQueue.where((v) {
+      for (final j in widget.scheduler.jobs) {
+        if (v.id == j.assetId && j.status != JobStatus.completed) return false;
+        if (v.id == j.assetId && j.status == JobStatus.completed) return false;
+      }
+      return true;
+    }).toList();
+    if (filtered.isEmpty) return;
+    final items = filtered;
 
     final entries = <Map<String, String>>[];
     for (int i = 0; i < items.length; i++) {
@@ -88,7 +107,7 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
 
     await widget.scheduler.addJobs(entries, channelId, email);
 
-    setState(() => _selectedForQueue.clear());
+    setState(() => _selectedForQueue.removeWhere((v) => filtered.contains(v)));
   }
 
   Future<void> _deleteSelected() async {
@@ -100,7 +119,7 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
         backgroundColor: Colors.grey[900],
         title: const Text('Delete videos?',
             style: TextStyle(color: Colors.white)),
-        content: Text('Permanently delete $count video$count from your device?',
+        content: Text('Move $count video$count to Trash?',
             style: TextStyle(color: Colors.grey[400])),
         actions: [
           TextButton(
@@ -109,7 +128,7 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: TextStyle(color: Colors.red[300])),
+            child: Text('Move to Trash', style: TextStyle(color: Colors.red[300])),
           ),
         ],
       ),
@@ -133,13 +152,11 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
     try {
       File? file;
 
-      // Try finding the asset in the photo gallery first
       final asset = _findAsset(job.assetId);
       if (asset != null) {
         file = await asset.file;
       }
 
-      // Fall back to filePath from the job if asset not found
       if (file == null && job.filePath != null) {
         final f = File(job.filePath!);
         if (f.existsSync()) file = f;
@@ -192,6 +209,29 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
     return _buildQueueView();
   }
 
+  void _updateCurrentMonth() {
+    if (!_scrollCtrl.hasClients || _galleryVideos.isEmpty) return;
+    final viewportWidth = MediaQuery.of(context).size.width;
+    const crossAxisCount = 3;
+    const crossAxisSpacing = 6.0;
+    const mainAxisSpacing = 6.0;
+    const padding = 16.0;
+    final availableWidth = viewportWidth - padding;
+    final itemWidth = (availableWidth - (crossAxisCount - 1) * crossAxisSpacing) / crossAxisCount;
+    final itemHeight = itemWidth / 0.7;
+    final rowHeight = itemHeight + mainAxisSpacing;
+    final totalRows = (_galleryVideos.length / crossAxisCount).ceil();
+    if (totalRows == 0) return;
+    final offset = _scrollCtrl.offset;
+    final row = (offset / rowHeight).floor().clamp(0, totalRows - 1);
+    final index = (row * crossAxisCount).clamp(0, _galleryVideos.length - 1);
+    final video = _galleryVideos[index];
+    final dateStr = DateFormat('MMM d yyyy').format(video.createDateTime);
+    if (_headerDateNotifier.value != dateStr) {
+      _headerDateNotifier.value = dateStr;
+    }
+  }
+
   Widget _buildPickerView() {
     final alreadyInQueue = <String>{};
     final alreadyUploaded = <String>{};
@@ -205,16 +245,22 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Select Videos'),
+        title: ValueListenableBuilder<String?>(
+          valueListenable: _headerDateNotifier,
+          builder: (_, dateStr, __) => Text(
+            dateStr != null ? 'Select Videos - $dateStr' : 'Select Videos',
+          ),
+        ),
         actions: [
-          if (_selectedForQueue.isNotEmpty)
+          if (_selectedForQueue.where((v) => !alreadyInQueue.contains(v.id) && !alreadyUploaded.contains(v.id)).isNotEmpty)
             TextButton(
               onPressed: () async {
                 await _addSelectedToQueue();
                 setState(() => _showPicker = false);
               },
-              child: Text('Add ${_selectedForQueue.length} to Queue'),
+              child: Text('Add ${_selectedForQueue.where((v) => !alreadyInQueue.contains(v.id) && !alreadyUploaded.contains(v.id)).length} to Queue'),
             ),
           if (_selectedForQueue.isNotEmpty)
             IconButton(
@@ -229,38 +275,41 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
       ),
       body: _galleryVideos.isEmpty
           ? const Center(child: CircularProgressIndicator())
-              : GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6,
-                    childAspectRatio: 0.7),
-                  itemCount: _galleryVideos.length,
-                  itemBuilder: (_, i) {
-                    final v = _galleryVideos[i];
-                    final selected = _selectedForQueue.contains(v);
-                    final inQueue = alreadyInQueue.contains(v.id);
-                    return GestureDetector(
-                      onTap: () {
-                        if (inQueue || alreadyUploaded.contains(v.id)) return;
-                        setState(() {
-                          if (selected) {
-                            _selectedForQueue.remove(v);
-                          } else {
-                            _selectedForQueue.add(v);
-                          }
-                        });
-                      },
-                      onDoubleTap: () {
-                        if (inQueue || alreadyUploaded.contains(v.id)) return;
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ReelPlayerPage(
-                              videos: _galleryVideos,
-                              initialIndex: i,
-                            ),
-                          ),
-                        );
-                      },
+          : GridView.builder(
+              controller: _scrollCtrl,
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
+                left: 8, right: 8, bottom: 8),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6,
+                childAspectRatio: 0.7),
+              itemCount: _galleryVideos.length,
+              itemBuilder: (_, i) {
+                final v = _galleryVideos[i];
+                final selected = _selectedForQueue.contains(v);
+                final inQueue = alreadyInQueue.contains(v.id);
+                return GestureDetector(
+                  onTap: () {
+                    if (inQueue) return;
+                    setState(() {
+                      if (selected) {
+                        _selectedForQueue.remove(v);
+                      } else {
+                        _selectedForQueue.add(v);
+                      }
+                    });
+                  },
+                  onDoubleTap: () {
+                    if (inQueue) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ReelPlayerPage(
+                          videos: _galleryVideos,
+                          initialIndex: i,
+                        ),
+                      ),
+                    );
+                  },
                   child: Stack(
                     children: [
                       FutureBuilder<Uint8List?>(
@@ -287,7 +336,7 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
                             child: const Text('Uploaded', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
                           ),
                         ),
-                      if (selected && !inQueue && !alreadyUploaded.contains(v.id))
+                      if (selected && !inQueue)
                         Container(
                           decoration: BoxDecoration(
                             color: Colors.black38,
@@ -345,6 +394,7 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('Upload Queue'),
         actions: [
@@ -388,9 +438,10 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
               ),
             )
           : ListView(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + kToolbarHeight + 12,
+                left: 12, right: 12, bottom: 12),
               children: [
-                // Daily limit indicator
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -432,7 +483,6 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
                 ),
                 const SizedBox(height: 16),
 
-                // Active uploads
                 if (active.isNotEmpty) ...[
                   Text('Active', style: TextStyle(color: Colors.grey[400], fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
@@ -440,7 +490,6 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
                   const SizedBox(height: 16),
                 ],
 
-                // Scheduled
                 if (scheduled.isNotEmpty) ...[
                   Text('Scheduled', style: TextStyle(color: Colors.grey[400], fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
@@ -448,7 +497,6 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
                   const SizedBox(height: 16),
                 ],
 
-                // Failed
                 if (failed.isNotEmpty) ...[
                   Text('Failed', style: TextStyle(color: Colors.red[400], fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
@@ -456,7 +504,6 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
                   const SizedBox(height: 16),
                 ],
 
-                // Completed
                 if (completed.isNotEmpty) ...[
                   Text('Completed', style: TextStyle(color: Colors.grey[400], fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
