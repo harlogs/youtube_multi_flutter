@@ -491,7 +491,7 @@ class _StatsPageState extends State<StatsPage> {
           const SizedBox(height: 8),
           () {
             final all = widget.scheduler.recentJobs;
-            final totalPages = (all.length / _pageSize).ceil();
+            final totalPages = all.isEmpty ? 1 : (all.length / _pageSize).ceil();
             final page = _recentPage.clamp(0, totalPages - 1);
             final items = all.skip(page * _pageSize).take(_pageSize).toList();
 
@@ -527,7 +527,7 @@ class _StatsPageState extends State<StatsPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.grey[900],
-                      border: Border(bottom: BorderSide(color: Colors.grey[850]!)),
+                      border: Border(bottom: BorderSide(color: Colors.grey[800]!)),
                     ),
                     child: Row(
                       children: [

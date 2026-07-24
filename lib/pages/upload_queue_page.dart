@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -60,6 +61,8 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
     if (mounted) {
       setState(() => _galleryVideos = {for (final v in all) v.id: v}.values.toList());
     }
+    // Start/resume upload processing after gallery is ready
+    _processNextIfNeeded();
   }
 
   Future<void> _addSelectedToQueue() async {
@@ -128,17 +131,22 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
     _isUploading = true;
 
     try {
+      File? file;
+
+      // Try finding the asset in the photo gallery first
       final asset = _findAsset(job.assetId);
-      if (asset == null) {
-        await widget.scheduler.markFailed(job.id, 'Video not found locally');
-        _isUploading = false;
-        _processNextIfNeeded();
-        return;
+      if (asset != null) {
+        file = await asset.file;
       }
 
-      final file = await asset.file;
+      // Fall back to filePath from the job if asset not found
+      if (file == null && job.filePath != null) {
+        final f = File(job.filePath!);
+        if (f.existsSync()) file = f;
+      }
+
       if (file == null) {
-        await widget.scheduler.markFailed(job.id, 'File not accessible');
+        await widget.scheduler.markFailed(job.id, 'Video file not accessible');
         _isUploading = false;
         _processNextIfNeeded();
         return;
@@ -340,6 +348,12 @@ class _UploadQueuePageState extends State<UploadQueuePage> {
       appBar: AppBar(
         title: const Text('Upload Queue'),
         actions: [
+          if (all.where((j) => j.status == JobStatus.pending || j.status == JobStatus.scheduled).isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.play_arrow, color: Colors.green),
+              tooltip: 'Resume pending uploads',
+              onPressed: () => _processNextIfNeeded(),
+            ),
           if (failed.isNotEmpty)
             IconButton(icon: const Icon(Icons.refresh), onPressed: () => widget.scheduler.retryAllFailed()),
           IconButton(

@@ -138,11 +138,18 @@ class UploadScheduler extends ChangeNotifier {
   }
 
   void _rescheduleAfterRestart() {
-    // Reset any in-progress uploads back to pending (app was restarted)
+    final now = DateTime.now();
     for (final job in _jobs) {
       if (job.status == JobStatus.uploading) {
         job.status = JobStatus.pending;
         job.progress = 0;
+      }
+      // Convert scheduled jobs whose date has arrived to pending
+      if (job.status == JobStatus.scheduled &&
+          job.scheduledDate != null &&
+          !job.scheduledDate!.isAfter(now)) {
+        job.status = JobStatus.pending;
+        job.scheduledDate = null;
       }
     }
   }
